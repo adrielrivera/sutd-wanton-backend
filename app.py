@@ -9,48 +9,46 @@ timers = Timers()  # Initialize the Timers class
 
 @app.route('/start_timer', methods=['POST'])
 def start_timer():
+    """Start a timer for a CAN ID and associate it with a table."""
     data = request.json
-    token_id = data.get('token_id')
+    can_id = data.get('can_id')
+    table_id = data.get('table_id')
 
-    if not token_id:
-        return jsonify({"error": "Missing token_id"}), 400
+    if not can_id or not table_id:
+        return jsonify({"error": "Missing can_id or table_id"}), 400
 
-    timers.start_timer(token_id)
-    return jsonify({"message": "Timer started!", "token_id": token_id}), 200
+    timers.start_timer(can_id, table_id)
+    return jsonify({
+        "message": "Timer started",
+        "table_id": table_id,
+        "can_id": can_id,
+        "duration": timers.timer_duration
+    }), 200
 
 
-@app.route('/get_timer_status/<token_id>', methods=['GET'])
-def get_timer_status(token_id):
-    timer = timers.get_timer_status(token_id)
+@app.route('/get_timer_status/<can_id>', methods=['GET'])
+def get_timer_status(can_id):
+    """Get the remaining time and table ID for a CAN ID."""
+    timer = timers.get_timer_status(can_id)
     if not timer:
         return jsonify({"error": "Timer not found"}), 404
     return jsonify(timer)
 
 
-@app.route('/end_timer/<token_id>', methods=['POST'])
-def end_timer(token_id):
-    success = timers.end_timer(token_id)
+@app.route('/end_timer/<can_id>', methods=['POST'])
+def end_timer(can_id):
+    """End a timer for a CAN ID."""
+    success = timers.end_timer(can_id)
     if success:
         return jsonify({"message": "Timer ended"}), 200
     return jsonify({"error": "Timer not found"}), 404
 
 
-@app.route('/check_in', methods=['POST'])
-def check_in():
-    timers.check_in()
-    return jsonify({"message": "User checked in", "checked_in_users": timers.get_checked_in_users()}), 200
-
-
-@app.route('/check_out', methods=['POST'])
-def check_out():
-    timers.check_out()
-    return jsonify({"message": "User checked out", "checked_in_users": timers.get_checked_in_users()}), 200
-
-
 @app.route('/admin/timer_duration', methods=['GET', 'POST'])
 def timer_duration():
+    """View or update the default timer duration."""
     if request.method == 'GET':
-        return jsonify({"timer_duration": timers.get_timer_duration()}), 200
+        return jsonify({"timer_duration": timers.timer_duration}), 200
     elif request.method == 'POST':
         data = request.json
         new_duration = data.get('duration')
@@ -60,9 +58,10 @@ def timer_duration():
         return jsonify({"message": "Timer duration updated", "timer_duration": new_duration}), 200
 
 
-@app.route('/admin/checked_in_users', methods=['GET'])
-def checked_in_users():
-    return jsonify({"checked_in_users": timers.get_checked_in_users()}), 200
+@app.route('/admin/tables_status', methods=['GET'])
+def tables_status():
+    """Get the status of all active timers (tables)."""
+    return jsonify(timers.get_all_timers()), 200
 
 
 if __name__ == '__main__':
