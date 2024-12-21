@@ -16,6 +16,7 @@ class Timers:
     def __init__(self, filepath):
         self.filepath = filepath
         self.timers = {}
+        self.tables = {}  # Tracks table occupancy
         self.default_duration = 900  # Default timer duration: 15 minutes
         self.load_timers()
         self.lock = threading.Lock()
@@ -23,13 +24,16 @@ class Timers:
     def load_timers(self):
         if os.path.exists(self.filepath):
             with open(self.filepath, "r") as file:
-                self.timers = json.load(file)
+                data = json.load(file)
+                self.timers = data.get("timers", {})
+                self.tables = data.get("tables", {})
         else:
             self.timers = {}
+            self.tables = {}
 
     def save_timers(self):
         with open(self.filepath, "w") as file:
-            json.dump(self.timers, file)
+            json.dump({"timers": self.timers, "tables": self.tables}, file)
 
     def start_timer(self, can_id, table_id):
         with self.lock:
@@ -38,6 +42,7 @@ class Timers:
                 "remaining_time": self.default_duration,
                 "alerts_sent": []
             }
+            self.tables[table_id] = {"occupied": True, "can_id": can_id}
             self.save_timers()
         return self.default_duration
 
@@ -48,14 +53,34 @@ class Timers:
     def end_timer(self, can_id):
         with self.lock:
             if can_id in self.timers:
+                table_id = self.timers[can_id]["table_id"]
+                self.tables[table_id]["occupied"] = True  # Table remains occupied
                 del self.timers[can_id]
                 self.save_timers()
                 return True
         return False
 
+    def set_table_vacant(self, table_id):
+        with self.lock:
+            if table_id in self.tables and self.tables[table_id]["occupied"]:
+                self.tables[table_id]["occupied"] = False
+                self.tables[table_id]["can_id"] = None
+                self.save_timers()
+                return True
+        return False
+
+    def count_occupied_tables(self):
+        with self.lock:
+            return sum(1 for table in self.tables.values() if table["occupied"])
+
     def update_duration(self, new_duration):
         with self.lock:
             self.default_duration = new_duration
+            self.save_timers()
+
+    def get_current_duration(self):
+        with self.lock:
+            return self.default_duration
 
     def decrement_timers(self):
         with self.lock:
@@ -99,6 +124,20 @@ def login():
     session['is_admin'] = is_admin
     return jsonify({"message": "Login successful", "can_id": can_id, "is_admin": is_admin}), 200
 
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({"message": "Logout successful"}), 200
+
+@app.route('/user', methods=['GET'])
+def get_user():
+    if 'can_id' in session:
+        return jsonify({
+            "can_id": session['can_id'],
+            "is_admin": session['is_admin']
+        }), 200
+    return jsonify({"error": "Not logged in"}), 401
+
 @app.route('/start_timer', methods=['POST'])
 def start_timer():
     data = request.json
@@ -123,32 +162,35 @@ def end_timer(can_id):
         return jsonify({"message": "Timer ended"}), 200
     return jsonify({"error": "Timer not found"}), 404
 
+@app.route('/set_table_vacant', methods=['POST'])
+def set_table_vacant():
+    data = request.json
+    table_id = data.get("table_id")
+    if not table_id:
+        return jsonify({"error": "Missing table_id"}), 400
+    success = timers.set_table_vacant(table_id)
+    if success:
+        return jsonify({"message": f"Table {table_id} is now vacant"}), 200
+    return jsonify({"error": "Table not found or already vacant"}), 404
+
+@app.route('/count_occupied_tables', methods=['GET'])
+def count_occupied_tables():
+    count = timers.count_occupied_tables()
+    return jsonify({"occupied_tables": count}), 200
+
 @app.route('/get_timer_duration', methods=['GET'])
 def get_timer_duration():
-    return jsonify({"duration": timers.default_duration}), 200
+    duration = timers.get_current_duration()
+    return jsonify({"default_duration": duration}), 200
 
 @app.route('/update_timer_duration', methods=['POST'])
 def update_timer_duration():
     data = request.json
     new_duration = data.get("duration")
-    if not new_duration or not isinstance(new_duration, int):
+    if not isinstance(new_duration, int) or new_duration <= 0:
         return jsonify({"error": "Invalid or missing duration"}), 400
     timers.update_duration(new_duration)
     return jsonify({"message": "Timer duration updated", "new_duration": new_duration}), 200
 
-@app.route('/logout', methods=['POST'])
-def logout():
-    session.clear()
-    return jsonify({"message": "Logout successful"}), 200
-
-@app.route('/user', methods=['GET'])
-def get_user():
-    if 'can_id' in session:
-        return jsonify({
-            "can_id": session['can_id'],
-            "is_admin": session['is_admin']
-        }), 200
-    return jsonify({"error": "Not logged in"}), 401
-
-if __name__ == '__main__':
-    socketio.run(app, debug=True)
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=5000, debug=True)
