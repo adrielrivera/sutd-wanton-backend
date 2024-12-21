@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import json
@@ -7,16 +7,18 @@ import threading
 import time
 
 app = Flask(__name__)
-CORS(app)
+app.secret_key = "your_secret_key"  # Replace with a secure key
+CORS(app, supports_credentials=True)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Timer Data Management
+# Timer Management
 class Timers:
     def __init__(self, filepath):
         self.filepath = filepath
         self.timers = {}
+        self.default_duration = 900  # Default timer duration: 15 minutes
         self.load_timers()
-        self.lock = threading.Lock()  # Prevent race conditions
+        self.lock = threading.Lock()
 
     def load_timers(self):
         if os.path.exists(self.filepath):
@@ -30,15 +32,14 @@ class Timers:
             json.dump(self.timers, file)
 
     def start_timer(self, can_id, table_id):
-        duration = 900  # Default duration is 15 minutes (900 seconds)
         with self.lock:
             self.timers[can_id] = {
                 "table_id": table_id,
-                "remaining_time": duration,
-                "alerts_sent": []  # Track sent alerts
+                "remaining_time": self.default_duration,
+                "alerts_sent": []
             }
             self.save_timers()
-        return duration
+        return self.default_duration
 
     def get_timer_status(self, can_id):
         with self.lock:
@@ -52,28 +53,29 @@ class Timers:
                 return True
         return False
 
+    def update_duration(self, new_duration):
+        with self.lock:
+            self.default_duration = new_duration
+
     def decrement_timers(self):
         with self.lock:
             for can_id, timer_data in list(self.timers.items()):
                 timer_data["remaining_time"] -= 1
-
-                # Check for alerts at specific remaining times
                 remaining_time = timer_data["remaining_time"]
-                if remaining_time in [240, 180, 120, 60]:  # 4, 3, 2, and 1 minute alerts
+                if remaining_time in [300, 240, 180, 120, 60]:
                     if remaining_time not in timer_data["alerts_sent"]:
-                        # Emit alert event
                         socketio.emit('timer_alert', {
                             "can_id": can_id,
                             "table_id": timer_data["table_id"],
                             "remaining_time": remaining_time
                         })
                         timer_data["alerts_sent"].append(remaining_time)
-
-                # If timer reaches 0, emit timer ended and remove it
                 if remaining_time <= 0:
-                    socketio.emit('timer_ended', {"can_id": can_id, "table_id": timer_data["table_id"]})
+                    socketio.emit('timer_ended', {
+                        "can_id": can_id,
+                        "table_id": timer_data["table_id"]
+                    })
                     del self.timers[can_id]
-
             self.save_timers()
 
 timers = Timers(filepath="data/timers.json")
@@ -82,64 +84,71 @@ timers = Timers(filepath="data/timers.json")
 def timer_thread():
     while True:
         timers.decrement_timers()
-        time.sleep(1)  # Decrement every second
+        time.sleep(1)
 
 threading.Thread(target=timer_thread, daemon=True).start()
 
-# Routes
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.json
+    can_id = data.get("can_id")
+    is_admin = data.get("is_admin", False)
+    if not can_id:
+        return jsonify({"error": "CAN ID is required"}), 400
+    session['can_id'] = can_id
+    session['is_admin'] = is_admin
+    return jsonify({"message": "Login successful", "can_id": can_id, "is_admin": is_admin}), 200
+
 @app.route('/start_timer', methods=['POST'])
 def start_timer():
     data = request.json
     can_id = data.get("can_id")
     table_id = data.get("table_id")
-
     if not can_id or not table_id:
-        return jsonify({"error": "Missing CAN ID or Table ID"}), 400
-
+        return jsonify({"error": "Missing can_id or table_id"}), 400
     duration = timers.start_timer(can_id, table_id)
-
-    # Emit event to notify clients
-    socketio.emit('timer_started', {
-        "can_id": can_id,
-        "table_id": table_id,
-        "duration": duration
-    })
-
-    return jsonify({"message": "Timer started!", "can_id": can_id, "table_id": table_id}), 200
-
+    return jsonify({"message": "Timer started", "duration": duration}), 200
 
 @app.route('/get_timer_status/<can_id>', methods=['GET'])
 def get_timer_status(can_id):
     timer = timers.get_timer_status(can_id)
     if not timer:
         return jsonify({"error": "Timer not found"}), 404
-    return jsonify(timer)
-
+    return jsonify(timer), 200
 
 @app.route('/end_timer/<can_id>', methods=['POST'])
 def end_timer(can_id):
     success = timers.end_timer(can_id)
     if success:
-        # Emit event to notify clients
-        socketio.emit('timer_ended', {"can_id": can_id})
-        return jsonify({"message": "Timer ended!", "can_id": can_id}), 200
+        return jsonify({"message": "Timer ended"}), 200
     return jsonify({"error": "Timer not found"}), 404
 
+@app.route('/get_timer_duration', methods=['GET'])
+def get_timer_duration():
+    return jsonify({"duration": timers.default_duration}), 200
 
-@app.route('/admin/tables_status', methods=['GET'])
-def get_tables_status():
-    return jsonify(timers.timers)
+@app.route('/update_timer_duration', methods=['POST'])
+def update_timer_duration():
+    data = request.json
+    new_duration = data.get("duration")
+    if not new_duration or not isinstance(new_duration, int):
+        return jsonify({"error": "Invalid or missing duration"}), 400
+    timers.update_duration(new_duration)
+    return jsonify({"message": "Timer duration updated", "new_duration": new_duration}), 200
 
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({"message": "Logout successful"}), 200
 
-@app.route('/admin/timer_duration', methods=['GET', 'POST'])
-def timer_duration():
-    if request.method == 'GET':
-        # Return the default duration (15 minutes)
-        return jsonify({"timer_duration": 900})
-    elif request.method == 'POST':
-        # Update the timer duration (not implemented in this version)
-        return jsonify({"message": "Feature not implemented yet"}), 501
-
+@app.route('/user', methods=['GET'])
+def get_user():
+    if 'can_id' in session:
+        return jsonify({
+            "can_id": session['can_id'],
+            "is_admin": session['is_admin']
+        }), 200
+    return jsonify({"error": "Not logged in"}), 401
 
 if __name__ == '__main__':
     socketio.run(app, debug=True)
