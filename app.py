@@ -194,8 +194,13 @@ def set_table_vacant():
 
 @app.route('/count_occupied_tables', methods=['GET'])
 def count_occupied_tables():
-    count = timers.count_occupied_tables()
-    return jsonify({"occupied_tables": count}), 200
+    if 'can_id' in session or 'is_admin' in session:
+        count = timers.count_occupied_tables()
+        return jsonify({"occupied_tables": count}), 200
+    return jsonify({"error": "Not logged in"}), 401
+
+
+
 
 @app.route('/get_timer_duration', methods=['GET'])
 def get_timer_duration():
