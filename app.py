@@ -10,13 +10,16 @@ from datetime import timedelta
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # Replace with a secure key
-app.permanent_session_lifetime = timedelta(days=1)  # Session lasts 1 day
-app.config.update(
-    SESSION_COOKIE_SAMESITE="None",
-    SESSION_COOKIE_SECURE=True,  # Requires HTTPS in production
-)
+app.permanent_session_lifetime = timedelta(days=1)
 
-CORS(app, supports_credentials=True)
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_COOKIE_SECURE'] = False  # Set to False for local development
+app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+
+CORS(app, supports_credentials=True, resources={r"/*": {"origins": "http://localhost:3000"}})
+
+
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Timer Management
@@ -115,15 +118,27 @@ threading.Thread(target=timer_thread, daemon=True).start()
 @app.route('/login', methods=['POST'])
 def login():
     data = request.json
+    session.permanent = True
+
+    # Check if admin login
+    if data.get("is_admin", False):
+        if data.get("password") == "admin":  # Hardcoded password for admin
+            session['is_admin'] = True
+            return jsonify({"is_admin": True, "message": "Admin login successful"}), 200
+        else:
+            return jsonify({"message": "Invalid admin password"}), 401
+
+    # Regular user login
     can_id = data.get("can_id")
-    is_admin = data.get("is_admin", False)
-    if not can_id:
-        return jsonify({"error": "CAN ID is required"}), 400
-    session.permanent = True  # Make session permanent
-    session['can_id'] = can_id
-    session['is_admin'] = is_admin
-    print("Session set:", dict(session))  # Debug: print session data
-    return jsonify({"message": "Login successful", "can_id": can_id, "is_admin": is_admin}), 200
+    if can_id:
+        session['can_id'] = can_id
+        session['is_admin'] = False
+        return jsonify({"can_id": can_id, "is_admin": False, "message": "User login successful"}), 200
+    else:
+        return jsonify({"message": "CAN ID is required"}), 400
+
+
+
 
 
 @app.route('/logout', methods=['POST'])
