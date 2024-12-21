@@ -5,9 +5,11 @@ import json
 import os
 import threading
 import time
+from datetime import timedelta
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # Replace with a secure key
+app.permanent_session_lifetime = timedelta(days=1)  # Session lasts 1 day
 CORS(app, supports_credentials=True)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
@@ -73,15 +75,6 @@ class Timers:
         with self.lock:
             return sum(1 for table in self.tables.values() if table["occupied"])
 
-    def update_duration(self, new_duration):
-        with self.lock:
-            self.default_duration = new_duration
-            self.save_timers()
-
-    def get_current_duration(self):
-        with self.lock:
-            return self.default_duration
-
     def decrement_timers(self):
         with self.lock:
             for can_id, timer_data in list(self.timers.items()):
@@ -120,6 +113,7 @@ def login():
     is_admin = data.get("is_admin", False)
     if not can_id:
         return jsonify({"error": "CAN ID is required"}), 400
+    session.permanent = True  # Make session permanent
     session['can_id'] = can_id
     session['is_admin'] = is_admin
     return jsonify({"message": "Login successful", "can_id": can_id, "is_admin": is_admin}), 200
@@ -136,7 +130,9 @@ def get_user():
             "can_id": session['can_id'],
             "is_admin": session['is_admin']
         }), 200
-    return jsonify({"error": "Not logged in"}), 401
+    else:
+        print("Session data:", dict(session))  # Debugging: print session
+        return jsonify({"error": "Not logged in"}), 401
 
 @app.route('/start_timer', methods=['POST'])
 def start_timer():
@@ -180,16 +176,15 @@ def count_occupied_tables():
 
 @app.route('/get_timer_duration', methods=['GET'])
 def get_timer_duration():
-    duration = timers.get_current_duration()
-    return jsonify({"default_duration": duration}), 200
+    return jsonify({"duration": timers.default_duration}), 200
 
 @app.route('/update_timer_duration', methods=['POST'])
 def update_timer_duration():
     data = request.json
     new_duration = data.get("duration")
-    if not isinstance(new_duration, int) or new_duration <= 0:
+    if not new_duration or not isinstance(new_duration, int):
         return jsonify({"error": "Invalid or missing duration"}), 400
-    timers.update_duration(new_duration)
+    timers.default_duration = new_duration
     return jsonify({"message": "Timer duration updated", "new_duration": new_duration}), 200
 
 if __name__ == "__main__":
