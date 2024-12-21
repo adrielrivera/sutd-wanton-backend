@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, session
+
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import json
@@ -10,6 +11,11 @@ from datetime import timedelta
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # Replace with a secure key
 app.permanent_session_lifetime = timedelta(days=1)  # Session lasts 1 day
+app.config.update(
+    SESSION_COOKIE_SAMESITE="None",
+    SESSION_COOKIE_SECURE=True,  # Requires HTTPS in production
+)
+
 CORS(app, supports_credentials=True)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
@@ -116,7 +122,9 @@ def login():
     session.permanent = True  # Make session permanent
     session['can_id'] = can_id
     session['is_admin'] = is_admin
+    print("Session set:", dict(session))  # Debug: print session data
     return jsonify({"message": "Login successful", "can_id": can_id, "is_admin": is_admin}), 200
+
 
 @app.route('/logout', methods=['POST'])
 def logout():
