@@ -1,1 +1,1 @@
-{"timers": {}, "tables": {"Z2": {"occupied": false, "can_id": null}, "A1": {"occupied": true, "can_id": "1234"}}}
+{"timers": {"2839393728383383": {"table_id": "K9", "remaining_time": 98, "alerts_sent": [300, 240, 180, 120]}}, "tables": {"Z2": {"occupied": false, "can_id": null}, "A1": {"occupied": true, "can_id": "1234"}, "TESTTABLE": {"occupied": true, "can_id": "TESTUSER"}, "n1": {"occupied": true, "can_id": "42"}, "K9": {"occupied": true, "can_id": "2839393728383383"}}}

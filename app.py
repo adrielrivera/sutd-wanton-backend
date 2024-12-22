@@ -13,7 +13,7 @@ app.secret_key = "your_secret_key"  # Replace with a secure key
 app.permanent_session_lifetime = timedelta(days=1)
 
 app.config['SESSION_TYPE'] = 'filesystem'
-app.config['SESSION_COOKIE_SECURE'] = False  # Set to False for local development
+app.config['SESSION_COOKIE_SECURE'] = True  # Set to False for local development
 app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
